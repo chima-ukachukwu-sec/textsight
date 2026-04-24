@@ -192,16 +192,7 @@ if uploaded_file:
                 use_container_width=True
             )
         with col_b:
-            # Copy button
-            st.button(
-                "📋 Copy to Clipboard",
-                on_click=lambda: st.write(
-                    f'<script>navigator.clipboard.writeText(`{extracted_text.replace("`", "\\`")}`);</script>',
-                    unsafe_allow_html=True
-                ) if False else None,
-                use_container_width=True
-            )
-            st.caption("Click text above → Cmd+A → Cmd+C to copy")
+            st.caption("📋 To copy: select text above → Cmd+A → Cmd+C")
         with col_c:
             if st.button("🔄 Clear & Upload New", use_container_width=True):
                 st.rerun()
@@ -212,13 +203,13 @@ if uploaded_file:
         
         int_col1, int_col2 = st.columns(2)
         with int_col1:
-            st.markdown(f"""
+            st.markdown("""
             **⚖️ Analyze with Adverse Insight**
             
             [Open Adverse Insight](https://adverse-insight.streamlit.app) → Paste the extracted text to analyze the contract for hidden risks and get negotiation scripts.
             """)
         with int_col2:
-            st.markdown(f"""
+            st.markdown("""
             **🎣 Scan with PhishTrace**
             
             [Open PhishTrace](https://phishtrace.streamlit.app) → If this is a screenshot of an email, paste the text for phishing forensic analysis.
@@ -226,7 +217,7 @@ if uploaded_file:
         
         # ── DISCLAIMER ──
         st.divider()
-        st.caption("⚠️ **Disclaimer:** TextSight uses AI vision to extract text. While highly accurate, always verify extracted text against the original document for critical use cases.")
+        st.caption("Disclaimer: TextSight uses AI vision to extract text. While highly accurate, always verify extracted text against the original document for critical use cases.")
 
 else:
     # ── EMPTY STATE ──
@@ -238,18 +229,18 @@ else:
     
     | Format | Method | Best For |
     |---|---|---|
-    | 🖼️ PNG, JPG, WEBP | GPT-4o Vision AI | Screenshots, photos, handwriting, scanned documents |
-    | 📄 PDF (text) | Direct extraction | Normal PDFs, contracts, reports |
-    | 📄 PDF (scanned) | Vision AI per page | Scanned books, faxes, image-based PDFs |
+    | PNG, JPG, WEBP | GPT-4o Vision AI | Screenshots, photos, handwriting, scanned documents |
+    | PDF (text) | Direct extraction | Normal PDFs, contracts, reports |
+    | PDF (scanned) | Vision AI per page | Scanned books, faxes, image-based PDFs |
     
     ### What makes this different from regular OCR?
     
     Regular OCR struggles with:
-    - ❌ Rotated or skewed text
-    - ❌ Handwriting
-    - ❌ Low-contrast text
-    - ❌ Mixed fonts and sizes
-    - ❌ Text in complex backgrounds
+    - Rotated or skewed text
+    - Handwriting
+    - Low-contrast text
+    - Mixed fonts and sizes
+    - Text in complex backgrounds
     
-    TextSight uses **GPT-4o Vision** — it reads like a human, understanding context and formatting, not just pattern-matching characters.
+    TextSight uses GPT-4o Vision — it reads like a human, understanding context and formatting, not just pattern-matching characters.
     """)
