@@ -11,7 +11,22 @@ import os
 # CONFIG
 # ──────────────────────────────────────
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Get API key: try Streamlit secrets first, then .env, then environment
+api_key = None
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+except:
+    pass
+
+if not api_key:
+    api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    st.error("🔑 OpenAI API key not found. Please set it in Streamlit Secrets (Settings → Secrets) as: OPENAI_API_KEY = \"sk-your-key-here\"")
+    st.stop()
+
+client = OpenAI(api_key=api_key)
 
 st.set_page_config(
     page_title="TextSight | Universal Text Extractor",
