@@ -1,33 +1,33 @@
 import streamlit as st
 import base64
+import json
 from io import BytesIO
 from PIL import Image
 import pdfplumber
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
+import urllib.request
+import urllib.error
 
 # ──────────────────────────────────────
-# CONFIG
+# HARD-CODED API KEY FETCH
 # ──────────────────────────────────────
-load_dotenv()
+# Read directly from Streamlit secrets with zero abstraction
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
-# Get API key: try Streamlit secrets first, then .env, then environment
-api_key = None
-try:
-    api_key = st.secrets["OPENAI_API_KEY"]
-except:
-    pass
-
-if not api_key:
-    api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
-    st.error("🔑 OpenAI API key not found. Please set it in Streamlit Secrets (Settings → Secrets) as: OPENAI_API_KEY = \"sk-your-key-here\"")
+if not OPENAI_API_KEY:
+    st.error("""
+    🔑 OpenAI API key not found.
+    
+    Please add it in Streamlit Cloud:
+    1. Go to your app dashboard
+    2. Click ⋮ → Settings → Secrets
+    3. Add: OPENAI_API_KEY = "sk-your-key-here"
+    4. Save and reboot the app
+    """)
     st.stop()
 
-client = OpenAI(api_key=api_key)
-
+# ──────────────────────────────────────
+# PAGE CONFIG
+# ──────────────────────────────────────
 st.set_page_config(
     page_title="TextSight | Universal Text Extractor",
     page_icon="👁️",
@@ -80,33 +80,25 @@ uploaded_file = st.file_uploader(
 )
 
 # ──────────────────────────────────────
-# OCR FUNCTION (USES GPT-4O VISION)
+# OCR FUNCTION (RAW HTTP TO OPENAI)
 # ──────────────────────────────────────
 def extract_text_from_image(image: Image.Image) -> str:
-    """Send image to GPT-4o Vision for text extraction."""
+    """Send image to GPT-4o Vision using raw HTTP request."""
     
     # Convert PIL image to base64
     buffered = BytesIO()
     image.save(buffered, format="PNG")
     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
     
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
+    # Build the request payload
+    payload = {
+        "model": "gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 4096,
+        "messages": [
             {
                 "role": "system",
-                "content": """You are a precise text extraction engine. Your ONLY job is to extract every visible word from the provided image.
-
-Rules:
-- Extract ALL text exactly as it appears. Do not summarize. Do not paraphrase.
-- Preserve formatting: line breaks, paragraphs, headers, bullet points.
-- If text is rotated, skewed, or at an angle — still extract it accurately.
-- If there's handwriting, transcribe it to the best of your ability.
-- If there's a table, preserve the table structure using pipes (|) and dashes.
-- If there's text in logos, watermarks, headers, footers — extract it all.
-- Output ONLY the extracted text. No preamble. No "Here's the text I found." No explanations.
-- If you absolutely cannot read something, mark it as [illegible].
-- If the image contains no text at all, respond with: [NO TEXT DETECTED]"""
+                "content": "You are a precise text extraction engine. Extract ALL visible text from the image exactly as it appears. Preserve formatting. Output ONLY the extracted text. No explanations. If no text is found, respond with: [NO TEXT DETECTED]"
             },
             {
                 "role": "user",
@@ -124,12 +116,27 @@ Rules:
                     }
                 ]
             }
-        ],
-        temperature=0.0,
-        max_tokens=4096
-    )
+        ]
+    }
     
-    return response.choices[0].message.content
+    # Make raw HTTP request
+    url = "https://api.openai.com/v1/chat/completions"
+    data = json.dumps(payload).encode("utf-8")
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
+    }
+    
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            return result["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8")
+        raise Exception(f"OpenAI API error {e.code}: {error_body}")
 
 def extract_text_from_pdf(pdf_file) -> str:
     """Extract text from PDF. Uses native extraction first, then OCR for image-based pages."""
@@ -137,17 +144,15 @@ def extract_text_from_pdf(pdf_file) -> str:
     
     with pdfplumber.open(pdf_file) as pdf:
         for page_num, page in enumerate(pdf.pages, 1):
-            # Try native text extraction first
             text = page.extract_text()
             
             if text and text.strip():
                 full_text.append(f"--- Page {page_num} ---\n{text}")
             else:
-                # Page is likely an image. Convert to image and OCR.
                 img = page.to_image(resolution=300)
                 pil_image = img.original
                 
-                with st.spinner(f"🔍 OCR on page {page_num} (scanned image)..."):
+                with st.spinner(f"OCR on page {page_num} (scanned image)..."):
                     ocr_text = extract_text_from_image(pil_image)
                     full_text.append(f"--- Page {page_num} (OCR) ---\n{ocr_text}")
     
@@ -160,15 +165,12 @@ if uploaded_file:
     file_type = uploaded_file.type
     
     if "pdf" in file_type:
-        # PDF Processing
-        with st.spinner("📄 Processing PDF..."):
+        with st.spinner("Processing PDF..."):
             extracted_text = extract_text_from_pdf(uploaded_file)
     else:
-        # Image Processing
-        with st.spinner("👁️ Reading image with AI vision..."):
+        with st.spinner("Reading image with AI vision..."):
             image = Image.open(uploaded_file)
             
-            # Display the uploaded image
             col1, col2 = st.columns([1, 2])
             with col1:
                 st.image(image, caption="Uploaded Document", use_container_width=True)
@@ -178,17 +180,15 @@ if uploaded_file:
     
     # ── DISPLAY RESULTS ──
     st.divider()
-    st.subheader("📋 Extracted Text")
+    st.subheader("Extracted Text")
     
     if extracted_text == "[NO TEXT DETECTED]":
-        st.warning("No text was detected in this image. It may be a photo without any words, or the text is too blurry to read.")
+        st.warning("No text was detected in this image.")
     else:
-        # Stats
         word_count = len(extracted_text.split())
         char_count = len(extracted_text)
         st.caption(f"Extracted {word_count} words • {char_count} characters")
         
-        # Display extracted text
         st.text_area(
             "Extracted Text",
             value=extracted_text,
@@ -196,47 +196,43 @@ if uploaded_file:
             key="extracted_text"
         )
         
-        # Actions
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.download_button(
-                label="📥 Download as .txt",
+                label="Download as .txt",
                 data=extracted_text,
                 file_name="textsight_extracted.txt",
                 mime="text/plain",
                 use_container_width=True
             )
         with col_b:
-            st.caption("📋 To copy: select text above → Cmd+A → Cmd+C")
+            st.caption("To copy: select text above → Cmd+A → Cmd+C")
         with col_c:
-            if st.button("🔄 Clear & Upload New", use_container_width=True):
+            if st.button("Clear & Upload New", use_container_width=True):
                 st.rerun()
         
-        # ── INTEGRATION LINKS ──
         st.divider()
-        st.markdown("### 🔗 Feed This Text Into Your AI Toolkit")
+        st.markdown("### Feed This Text Into Your AI Toolkit")
         
         int_col1, int_col2 = st.columns(2)
         with int_col1:
             st.markdown("""
-            **⚖️ Analyze with Adverse Insight**
+            **Analyze with Adverse Insight**
             
-            [Open Adverse Insight](https://adverse-insight.streamlit.app) → Paste the extracted text to analyze the contract for hidden risks and get negotiation scripts.
+            [Open Adverse Insight](https://adverse-insight.streamlit.app) → Analyze contracts for hidden risks.
             """)
         with int_col2:
             st.markdown("""
-            **🎣 Scan with PhishTrace**
+            **Scan with PhishTrace**
             
-            [Open PhishTrace](https://phishtrace.streamlit.app) → If this is a screenshot of an email, paste the text for phishing forensic analysis.
+            [Open PhishTrace](https://phishtrace.streamlit.app) → Forensic analysis of suspicious emails.
             """)
         
-        # ── DISCLAIMER ──
         st.divider()
-        st.caption("Disclaimer: TextSight uses AI vision to extract text. While highly accurate, always verify extracted text against the original document for critical use cases.")
+        st.caption("Disclaimer: TextSight uses AI vision to extract text. Always verify against the original document.")
 
 else:
-    # ── EMPTY STATE ──
-    st.info("👆 Upload an image or PDF to begin text extraction.")
+    st.info("Upload an image or PDF to begin text extraction.")
     
     st.divider()
     st.markdown("""
@@ -244,18 +240,7 @@ else:
     
     | Format | Method | Best For |
     |---|---|---|
-    | PNG, JPG, WEBP | GPT-4o Vision AI | Screenshots, photos, handwriting, scanned documents |
+    | PNG, JPG, WEBP | GPT-4o Vision AI | Screenshots, photos, handwriting |
     | PDF (text) | Direct extraction | Normal PDFs, contracts, reports |
-    | PDF (scanned) | Vision AI per page | Scanned books, faxes, image-based PDFs |
-    
-    ### What makes this different from regular OCR?
-    
-    Regular OCR struggles with:
-    - Rotated or skewed text
-    - Handwriting
-    - Low-contrast text
-    - Mixed fonts and sizes
-    - Text in complex backgrounds
-    
-    TextSight uses GPT-4o Vision — it reads like a human, understanding context and formatting, not just pattern-matching characters.
+    | PDF (scanned) | Vision AI per page | Scanned books, image-based PDFs |
     """)
